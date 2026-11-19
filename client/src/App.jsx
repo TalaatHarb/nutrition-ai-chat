@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
+import AssistantMarkdown from './AssistantMarkdown.jsx'
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
+function apiUrl(path) {
+  const base = window._env_?.API_URL || (import.meta.env.VITE_API_BASE ?? '/api')
+  return `${base.replace(/\/+$/, '')}/${path}`
+}
 const HEALTH_INTERVAL_MS = 5000
+const STREAM_ERROR_PREFIX = '[error] '
 
 const STATUS_LABELS = {
   checking: 'Checking server…',
@@ -9,6 +14,12 @@ const STATUS_LABELS = {
   degraded: 'Server online, Ollama unreachable',
   offline: 'Server offline',
 }
+
+const STARTERS = [
+  ['Plan my meals', 'Help me plan a week of simple, balanced meals.'],
+  ['Scale a recipe', 'How much of each ingredient do I need to scale a recipe from 2 to 5 servings?'],
+  ['Set meal times', 'Help me build a meal schedule around my workday.'],
+]
 
 function useServerHealth() {
   const [status, setStatus] = useState('checking')
@@ -21,7 +32,7 @@ function useServerHealth() {
       controller?.abort()
       const current = (controller = new AbortController())
       try {
-        const res = await fetch(`${API_BASE}/health`, {
+        const res = await fetch(apiUrl('health'), {
           signal: AbortSignal.any([current.signal, AbortSignal.timeout(3000)]),
           cache: 'no-store',
         })
@@ -65,20 +76,25 @@ export default function App() {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(true)
-  const [busy, setBusy] = useState(false)
+  const [generatingIndex, setGeneratingIndex] = useState(null)
   const [error, setError] = useState('')
+  const [copyFeedback, setCopyFeedback] = useState(null)
+  const busy = generatingIndex !== null
   const abortRef = useRef(null)
+  const copyTimerRef = useRef(null)
   const listEndRef = useRef(null)
   const formRef = useRef(null)
+  const inputRef = useRef(null)
   const health = useServerHealth()
   useEffect(() => {
-    listEndRef.current?.scrollIntoView({ block: 'end' })
-  }, [messages])
+    if (generatingIndex !== null && generatingIndex === messages.length - 1) {
+      listEndRef.current?.scrollIntoView({ block: 'end' })
+    }
+  }, [messages, generatingIndex])
 
-  const updateLast = (content) =>
-    setMessages((prev) => [...prev.slice(0, -1), { ...prev.at(-1), content }])
+  useEffect(() => () => clearTimeout(copyTimerRef.current), [])
 
-  async function send(e) {
+  function send(e) {
     e.preventDefault()
     const text = input.trim()
     if (!text || busy) return
@@ -86,42 +102,96 @@ export default function App() {
     const history = [...messages, { role: 'user', content: text }]
     setMessages([...history, { role: 'assistant', content: '' }])
     setInput('')
+    generate(history, history.length)
+  }
+
+  function regenerate(index) {
+    if (busy) return
+    const original = messages[index]
+    setMessages((prev) => prev.map((m, i) => i === index ? { role: 'assistant', content: '' } : m))
+    generate(messages.slice(0, index), index, original)
+  }
+
+  async function generate(history, index, original) {
+    const updateReply = (content) =>
+      setMessages((prev) => prev.map((m, i) => i === index ? { role: 'assistant', content } : m))
+
     setError('')
-    setBusy(true)
+    setGeneratingIndex(index)
     const controller = new AbortController()
     abortRef.current = controller
 
     try {
-      const res = await fetch(`${API_BASE}/${streaming ? 'chat-stream' : 'chat'}`, {
+      const res = await fetch(apiUrl(streaming ? 'chat-stream' : 'chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: history }),
+        body: JSON.stringify({ messages: history.map(({ role, content }) => ({ role, content })) }),
         signal: controller.signal,
       })
-      if (!res.ok) throw new Error(`${res.status} ${await res.text()}`)
+      const filtered = res.headers.get('X-Filtered-Message-Indices')
+      if (filtered) {
+        const blocked = new Set(filtered.split(',').map(Number))
+        setMessages((prev) => prev.map((m, i) => i < history.length && blocked.has(i)
+          ? { ...m, filtered: true }
+          : m))
+      }
+      if (!res.ok) {
+        const detail = await res.text()
+        if (res.status === 422 && filtered) {
+          throw new Error('No usable user message remains. Send a nutrition question.')
+        }
+        throw new Error(`${res.status} ${detail}`)
+      }
 
+      let reply
       if (streaming) {
         const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
         let acc = ''
-        for (;;) {
-          const { value, done } = await reader.read()
-          if (done) break
-          acc += value
-          updateLast(acc)
+        try {
+          for (;;) {
+            const { value, done } = await reader.read()
+            if (done) break
+            acc += value
+            const errorIndex = acc.indexOf(STREAM_ERROR_PREFIX)
+            updateReply(errorIndex === -1 ? acc : acc.slice(0, errorIndex))
+          }
+          const errorIndex = acc.indexOf(STREAM_ERROR_PREFIX)
+          if (errorIndex !== -1) throw new Error(acc.slice(errorIndex + STREAM_ERROR_PREFIX.length))
+          reply = acc
+        } finally {
+          reader.releaseLock()
         }
       } else {
         const data = await res.json()
-        updateLast(data.message.content)
+        reply = data.message.content
       }
+      if (!reply.trim()) throw new Error('The assistant did not return a reply.')
+      updateReply(reply)
     } catch (err) {
       if (err.name !== 'AbortError') {
         setError(err.message)
-        setMessages((prev) => (prev.at(-1)?.content ? prev : prev.slice(0, -1)))
       }
+      setMessages((prev) => {
+        if (original) return prev.map((m, i) => i === index ? original : m)
+        return prev[index].content.trim() ? prev : prev.filter((_, i) => i !== index)
+      })
     } finally {
-      setBusy(false)
+      setGeneratingIndex(null)
       abortRef.current = null
     }
+  }
+
+  async function copyMessage(index, content) {
+    let text
+    try {
+      await navigator.clipboard.writeText(content)
+      text = 'Copied'
+    } catch {
+      text = 'Could not copy'
+    }
+    clearTimeout(copyTimerRef.current)
+    setCopyFeedback({ index, text })
+    copyTimerRef.current = setTimeout(() => setCopyFeedback(null), 2500)
   }
 
   function onKeyDown(e) {
@@ -137,7 +207,8 @@ export default function App() {
     <div className="app">
       <header className="header">
         <h1>
-          Ollama Chat
+          <img className="brand-icon" src="/favicon.svg" alt="" />
+          Nutrition Assistant
           <span
             className={`status-dot ${health}`}
             role="status"
@@ -162,6 +233,9 @@ export default function App() {
             onClick={() => {
               setMessages([])
               setError('')
+              setInput('')
+              setCopyFeedback(null)
+              inputRef.current.focus()
             }}
             disabled={busy || messages.length === 0}
           >
@@ -170,13 +244,69 @@ export default function App() {
         </div>
       </header>
 
-      <main className="messages" aria-live="polite">
-        {messages.length === 0 && <p className="empty">Ask me anything to get started.</p>}
-        {messages.map((m, i) => (
-          <div key={i} className={`bubble ${m.role}`}>
-            {m.content || (busy && i === messages.length - 1 ? <span className="typing">…</span> : '')}
+      <main className="messages">
+        {messages.length === 0 && (
+          <section className="welcome">
+            <img className="welcome-icon" src="/favicon.svg" alt="" />
+            <h2>I am your nutrition assistant. How can I help you?</h2>
+            <p>Let&apos;s plan balanced meals that fit your tastes, budget, and routine.</p>
+            <div className="starters">
+              {STARTERS.map(([label, prompt]) => (
+                <button
+                  type="button"
+                  className="secondary starter"
+                  key={label}
+                  onClick={() => {
+                    setInput(prompt)
+                    inputRef.current.focus()
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+        {messages.length > 0 && (
+          <div className="transcript" role="log" aria-label="Conversation" aria-busy={busy}>
+            {messages.map((m, i) => (
+              <div key={i} className={`bubble ${m.role}`}>
+                <span className="visually-hidden">{m.role === 'assistant' ? 'Nutrition assistant: ' : 'You: '}</span>
+                {m.filtered && <p className="filter-badge">Possible prompt injection — not sent to the model</p>}
+                {m.content
+                  ? m.role === 'assistant' && !m.filtered
+                    ? <AssistantMarkdown content={m.content} />
+                    : <div className="message-text">{m.content}</div>
+                  : i === generatingIndex && <span className="typing">…</span>}
+                {(m.content || i === generatingIndex) && (
+                  <div className="message-actions">
+                    <button
+                      type="button"
+                      disabled={i === generatingIndex}
+                      aria-label={`Copy message ${i + 1}`}
+                      onClick={() => copyMessage(i, m.content)}
+                    >
+                      Copy
+                    </button>
+                    {m.role === 'assistant' && (
+                      <button
+                        type="button"
+                        aria-disabled={busy}
+                        aria-label={`Regenerate reply ${i + 1}`}
+                        onClick={() => regenerate(i)}
+                      >
+                        Regenerate
+                      </button>
+                    )}
+                    <span className="copy-feedback" aria-live="polite">
+                      {copyFeedback?.index === i ? copyFeedback.text : ''}
+                    </span>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
-        ))}
+        )}
         {error && (
           <p className="error" role="alert">
             {error}
@@ -185,29 +315,32 @@ export default function App() {
         <div ref={listEndRef} />
       </main>
 
-      <form ref={formRef} className="composer" onSubmit={send}>
-        <label htmlFor="chat-input" className="visually-hidden">
-          Message
-        </label>
-        <textarea
-          id="chat-input"
-          rows={1}
-          placeholder="Type a message… (Shift+Enter for newline)"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={onKeyDown}
-          autoFocus
-        />
-        {busy ? (
-          <button type="button" onClick={() => abortRef.current?.abort()}>
-            Stop
-          </button>
-        ) : (
-          <button type="submit" disabled={!input.trim()}>
-            Send
-          </button>
-        )}
-      </form>
+      <footer className="chat-footer">
+        <form ref={formRef} className="composer" onSubmit={send}>
+          <label htmlFor="chat-input" className="visually-hidden">
+            Message
+          </label>
+          <textarea
+            id="chat-input"
+            ref={inputRef}
+            rows={1}
+            placeholder="Ask about meals, portions, or timing…"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={onKeyDown}
+          />
+          {busy ? (
+            <button type="button" onClick={() => abortRef.current?.abort()}>
+              Stop
+            </button>
+          ) : (
+            <button type="submit" disabled={!input.trim()}>
+              Send
+            </button>
+          )}
+        </form>
+        <p>General nutrition guidance, not medical advice.</p>
+      </footer>
     </div>
   )
 }
