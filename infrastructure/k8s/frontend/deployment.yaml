@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: nutrition-ai-chat-fe
+  namespace: nutrition-ai-chat
 spec:
   replicas: 2
   selector:

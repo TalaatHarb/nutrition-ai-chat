@@ -2,6 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: nutrition-ai-chat-fe-config
+  namespace: nutrition-ai-chat
 data:
   API_URL: /api
   BACKEND_URL: http://nutrition-ai-chat-be:8000
