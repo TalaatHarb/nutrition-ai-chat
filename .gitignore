@@ -40,3 +40,6 @@ logs/
 Thumbs.db
 *.suo
 *.sw?
+
+# Secrets
+secrets.yaml
