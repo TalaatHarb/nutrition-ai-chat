@@ -4,7 +4,7 @@ The manifests follow the reference project's namespace, ConfigMap, Secret, Deplo
 
 ## Cluster setup
 
-1. In [`backend/configmap.yaml`](backend/configmap.yaml), set `OLLAMA_MODEL` to a tool-capable model installed on your Ollama server (default `qwen2.5:3b`) and `OLLAMA_URL` to the server's base URL, without `/api`. The default assumes an `ollama` Service in the same namespace. For a service in another namespace, use its fully qualified service name, for example `http://ollama.models.svc.cluster.local:11434`.
+1. In [`backend/configmap.yaml`](backend/configmap.yaml), set `OLLAMA_MODEL` to a tool-capable model and `OLLAMA_URL` to the upstream base URL (with or without `/api`). The defaults assume an `ollama` Service in the same namespace with `qwen2.5:3b` installed. For a service in another namespace, use its fully qualified service name, for example `http://ollama.models.svc.cluster.local:11434`. For direct Ollama Cloud access, set `OLLAMA_URL` to `https://ollama.com/api` and use an exact cloud API model ID, such as `gemma4:31b` from [Ollama's example](https://docs.ollama.com/cloud/api).
 2. Point `nutrition-ai.talaatharb.net` at the cluster's nginx ingress controller. The [Ingress](ingress.yaml) uses the `nginx` IngressClass and the `letsencrypt-prod` cert-manager ClusterIssuer from the reference deployment.
 3. Publish the images by pushing a tag such as `v1.2.3`. Make both GHCR packages public for anonymous pulls, or configure a registry pull secret if the packages are private. Set both `newTag` values in [`kustomization.yaml`](kustomization.yaml) to the published version (for example `1.2.3`, without `v`) instead of `latest` for repeatable rollouts.
 
@@ -21,6 +21,16 @@ kubectl -n nutrition-ai-chat rollout status deployment/nutrition-ai-chat-fe
 If Ollama requires authentication, create the same Secret (`nutrition-ai-chat-be-secret`, key `OLLAMA_API_KEY`) with your cluster's secret-management tooling instead of applying the empty example. Do not commit the key or reapply the empty template over a configured Secret. The backend sends a bearer token upstream only when this key is nonempty.
 
 Check `https://nutrition-ai.talaatharb.net/api/health`: `ollama: true` means the backend can reach Ollama's version endpoint. Send a chat message to confirm the configured model is available. Pod probes use `/healthz`, which does not depend on Ollama.
+
+## Troubleshoot Ollama
+
+After deploying the updated backend image and restarting the pods if the ConfigMap or Secret changed, send a chat message and inspect the backend logs:
+
+```powershell
+kubectl -n nutrition-ai-chat logs -l app.kubernetes.io/name=nutrition-ai-chat-be --all-containers=true --prefix=true --since=10m
+```
+
+Look for `Ollama request failed`. Warnings include the endpoint, model (for chat), status or failure type, and whether a key is configured, without logging keys, prompts, or upstream bodies. A `404` on the correct `/api/chat` URL is a reason to check the exact model ID and its availability to your account. A successful `/health` probe does not verify that the key or model works for chat.
 
 ## Configuration and upgrades
 

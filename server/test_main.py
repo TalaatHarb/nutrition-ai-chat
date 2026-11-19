@@ -9,8 +9,8 @@ from fastapi.testclient import TestClient
 import main
 from nutrition_tools import calculator, current_datetime, run_tool, shift_datetime
 
-OLLAMA_CHAT = f"{main.OLLAMA_URL}/api/chat"
-OLLAMA_VERSION = f"{main.OLLAMA_URL}/api/version"
+OLLAMA_CHAT = main.ollama_endpoint("chat")
+OLLAMA_VERSION = main.ollama_endpoint("version")
 BODY = {"messages": [{"role": "user", "content": "hi"}]}
 
 
@@ -72,6 +72,40 @@ def test_ollama_bearer_token_is_optional(client, ollama, monkeypatch, key):
     assert client.post("/chat-stream", json=BODY).text == "Hi"
     for call in [*version.calls, *route.calls]:
         assert call.request.headers.get("authorization") == (f"Bearer {key}" if key else None)
+
+
+@pytest.mark.parametrize("base", ["https://ollama.com", "https://ollama.com/api", "https://ollama.com/api/"])
+def test_cloud_base_url_keeps_one_api_prefix(client, ollama, monkeypatch, base):
+    monkeypatch.setattr(main, "OLLAMA_URL", base)
+    version = ollama.get("https://ollama.com/api/version").respond(200)
+    chat = ollama.post("https://ollama.com/api/chat").mock(side_effect=[
+        httpx.Response(200, json={"model": "m", "message": {"role": "assistant", "content": "Hi"}}),
+        httpx.Response(200, text=ndjson({"message": {"content": "Hi"}, "done": True})),
+    ])
+    assert client.get("/health").json()["ollama"] is True
+    assert client.post("/chat", json=BODY).status_code == 200
+    assert client.post("/chat-stream", json=BODY).text == "Hi"
+    assert version.call_count == 1
+    assert chat.call_count == 2
+
+
+@pytest.mark.parametrize("endpoint", ["/chat", "/chat-stream"])
+def test_logs_ollama_status_without_secrets_or_body(client, ollama, monkeypatch, caplog, endpoint):
+    monkeypatch.setattr(main, "OLLAMA_URL", "https://example.test/api")
+    monkeypatch.setattr(main, "OLLAMA_API_KEY", "secret-test-key")
+    ollama.post("https://example.test/api/chat").respond(404, text="private-upstream-body")
+    response = client.post(endpoint, json={
+        "model": "gemma4:31b",
+        "messages": [{"role": "user", "content": "private-user-prompt"}],
+    })
+
+    assert "HTTP 404" in response.text
+    assert "operation=" + endpoint[1:] in caplog.text
+    assert "endpoint='https://example.test/api/chat'" in caplog.text
+    assert "model='gemma4:31b'" in caplog.text
+    assert "status=404 api_key_configured=True" in caplog.text
+    for private in ("secret-test-key", "private-upstream-body", "private-user-prompt"):
+        assert private not in caplog.text
 
 
 def test_swagger_ui_available(client):

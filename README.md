@@ -19,6 +19,8 @@ python -m venv .venv
 
 Env vars: `OLLAMA_URL` (default `http://localhost:11434`), `OLLAMA_MODEL` (default `qwen2.5:3b`), `OLLAMA_API_KEY` (optional upstream bearer token), and `CORS_ORIGINS` (comma-separated browser origins for cross-origin API calls).
 
+For [direct Ollama Cloud access](https://docs.ollama.com/cloud/api), set `OLLAMA_URL=https://ollama.com/api` and provide an `OLLAMA_API_KEY`. Try an exact API model ID such as `gemma4:31b`, the one in Ollama's cloud example. The backend accepts URLs with or without the trailing `/api`. Check the [deployment guide](infrastructure/k8s/README.md#troubleshoot-ollama) for failure logs on Kubernetes.
+
 Both endpoints accept the same payload:
 
 ```json
