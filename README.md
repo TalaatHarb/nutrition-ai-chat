@@ -4,7 +4,7 @@ A nutrition chat backed by FastAPI and a local Ollama model. Ask for meal ideas,
 
 ## Demo
 
-![Ollama chat client in action with streaming replies and server health polling](img/chat-client-server.gif)
+![Screenshot of the Nutrition Assistant chat interface](img/nutrition-chat.PNG)
 
 ## Server (`server/`)
 
