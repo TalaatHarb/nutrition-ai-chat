@@ -5,7 +5,7 @@ WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY main.py nutrition_prompt.txt nutrition_tools.py prompt_filter.py ./
+COPY main.py chat_service.py llm_provider.py providers.py ollama_provider.py nutrition_prompt.txt nutrition_tools.py prompt_filter.py ./
 
 USER 10001:10001
 EXPOSE 8000

@@ -4,7 +4,6 @@ on:
   pull_request:
   push:
     branches: [master]
-  workflow_call:
 
 permissions:
   contents: read
@@ -23,7 +22,8 @@ jobs:
           cache: pip
           cache-dependency-path: server/requirements*.txt
       - run: python -m pip install -r requirements-dev.txt
-      - run: python -m pytest
+      - name: Run backend tests (mocked providers and Ollama HTTP)
+        run: python -m pytest -v
 
   frontend:
     runs-on: ubuntu-latest
@@ -43,7 +43,6 @@ jobs:
       - run: npm run build
 
   container-build:
-    if: github.ref_type != 'tag'
     needs: [backend, frontend]
     runs-on: ubuntu-latest
     strategy:

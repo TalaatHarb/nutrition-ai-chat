@@ -4,5 +4,6 @@ metadata:
   name: nutrition-ai-chat-be-config
   namespace: nutrition-ai-chat
 data:
+  LLM_PROVIDER: ollama
   OLLAMA_URL: https://ollama.com
   OLLAMA_MODEL: gemma4:31b

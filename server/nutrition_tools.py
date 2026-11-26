@@ -5,6 +5,8 @@ import re
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from llm_provider import ToolDefinition
+
 
 BINARY_OPERATORS = {
     ast.Add: operator.add,
@@ -67,19 +69,16 @@ def shift_datetime(start: str, days: int = 0, minutes: int = 0) -> str:
 
 
 def _tool(function, description, required, **properties):
-    return {
-        "type": "function",
-        "function": {
-            "name": function.__name__,
-            "description": description,
-            "parameters": {
-                "type": "object",
-                "properties": properties,
-                "required": required,
-                "additionalProperties": False,
-            },
+    return ToolDefinition(
+        name=function.__name__,
+        description=description,
+        parameters={
+            "type": "object",
+            "properties": properties,
+            "required": required,
+            "additionalProperties": False,
         },
-    }
+    )
 
 
 TOOLS = [

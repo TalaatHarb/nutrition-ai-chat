@@ -7,11 +7,18 @@ import respx
 from fastapi.testclient import TestClient
 
 import main
+import chat_service
 from nutrition_tools import calculator, current_datetime, run_tool, shift_datetime
+from ollama_provider import OllamaProvider
 
-OLLAMA_CHAT = main.ollama_endpoint("chat")
-OLLAMA_VERSION = main.ollama_endpoint("version")
+OLLAMA_CHAT = OllamaProvider().endpoint("chat")
+OLLAMA_VERSION = OllamaProvider().endpoint("version")
 BODY = {"messages": [{"role": "user", "content": "hi"}]}
+
+
+@pytest.fixture(autouse=True)
+def default_provider(monkeypatch):
+    monkeypatch.setattr(main, "provider", OllamaProvider())
 
 
 @pytest.fixture
@@ -61,7 +68,7 @@ def test_healthz_is_independent_of_ollama(client, ollama):
 
 @pytest.mark.parametrize("key", ["", "test-token"])
 def test_ollama_bearer_token_is_optional(client, ollama, monkeypatch, key):
-    monkeypatch.setattr(main, "OLLAMA_API_KEY", key)
+    monkeypatch.setattr(main.provider, "api_key", key)
     version = ollama.get(OLLAMA_VERSION).respond(200)
     route = ollama.post(OLLAMA_CHAT).mock(side_effect=[
         httpx.Response(200, json={"model": "m", "message": {"role": "assistant", "content": "Hi"}}),
@@ -76,7 +83,7 @@ def test_ollama_bearer_token_is_optional(client, ollama, monkeypatch, key):
 
 @pytest.mark.parametrize("base", ["https://ollama.com", "https://ollama.com/api", "https://ollama.com/api/"])
 def test_cloud_base_url_keeps_one_api_prefix(client, ollama, monkeypatch, base):
-    monkeypatch.setattr(main, "OLLAMA_URL", base)
+    monkeypatch.setattr(main.provider, "url", base)
     version = ollama.get("https://ollama.com/api/version").respond(200)
     chat = ollama.post("https://ollama.com/api/chat").mock(side_effect=[
         httpx.Response(200, json={"model": "m", "message": {"role": "assistant", "content": "Hi"}}),
@@ -91,8 +98,8 @@ def test_cloud_base_url_keeps_one_api_prefix(client, ollama, monkeypatch, base):
 
 @pytest.mark.parametrize("endpoint", ["/chat", "/chat-stream"])
 def test_logs_ollama_status_without_secrets_or_body(client, ollama, monkeypatch, caplog, endpoint):
-    monkeypatch.setattr(main, "OLLAMA_URL", "https://example.test/api")
-    monkeypatch.setattr(main, "OLLAMA_API_KEY", "secret-test-key")
+    monkeypatch.setattr(main.provider, "url", "https://example.test/api")
+    monkeypatch.setattr(main.provider, "api_key", "secret-test-key")
     ollama.post("https://example.test/api/chat").respond(404, text="private-upstream-body")
     response = client.post(endpoint, json={
         "model": "gemma4:31b",
@@ -130,10 +137,10 @@ def test_chat_forwards_payload_and_returns_message(client, ollama):
 
 def test_chat_uses_default_model(client, ollama):
     route = ollama.post(OLLAMA_CHAT).respond(
-        200, json={"model": main.DEFAULT_MODEL, "message": {"role": "assistant", "content": "x"}}
+        200, json={"model": main.provider.default_model, "message": {"role": "assistant", "content": "x"}}
     )
     client.post("/chat", json=BODY)
-    assert json.loads(route.calls.last.request.content)["model"] == main.DEFAULT_MODEL
+    assert json.loads(route.calls.last.request.content)["model"] == main.provider.default_model
 
 
 def test_chat_propagates_ollama_error_status(client, ollama):
@@ -146,6 +153,15 @@ def test_chat_propagates_ollama_error_status(client, ollama):
 def test_chat_returns_502_when_ollama_unreachable(client, ollama):
     ollama.post(OLLAMA_CHAT).mock(side_effect=httpx.ConnectError("refused"))
     assert client.post("/chat", json=BODY).status_code == 502
+
+
+def test_incomplete_ollama_message_is_not_treated_as_an_assistant_reply(client, ollama):
+    ollama.post(OLLAMA_CHAT).respond(200, json={
+        "model": "m", "message": {"content": "untyped upstream content"},
+    })
+    response = client.post("/chat", json=BODY)
+    assert response.status_code == 502
+    assert response.json() == {"detail": "Ollama returned an invalid response."}
 
 
 @pytest.mark.parametrize(
@@ -286,7 +302,7 @@ def test_stream_collects_tool_calls_across_chunks(client, ollama):
 
 @pytest.mark.parametrize("stream", [False, True])
 def test_tool_rounds_are_bounded(client, ollama, monkeypatch, stream):
-    monkeypatch.setattr(main, "MAX_TOOL_ROUNDS", 1)
+    monkeypatch.setattr(chat_service, "MAX_TOOL_ROUNDS", 1)
     message = {"role": "assistant", "content": "", "tool_calls": [tool_call("calculator", expression="1+1")]}
     if stream:
         route = ollama.post(OLLAMA_CHAT).respond(200, text=ndjson({"message": message, "done": True}))
