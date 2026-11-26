@@ -4,7 +4,7 @@ metadata:
   name: nutrition-ai-chat-be
   namespace: nutrition-ai-chat
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: nutrition-ai-chat-be
