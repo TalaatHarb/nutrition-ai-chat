@@ -113,8 +113,11 @@ export default function App() {
   }
 
   async function generate(history, index, original) {
+    const sentHistory = history
+      .map((message, messageIndex) => ({ message, messageIndex }))
+      .filter(({ message }) => !message.filtered && !message.blockedResponse)
     const updateReply = (content) =>
-      setMessages((prev) => prev.map((m, i) => i === index ? { role: 'assistant', content } : m))
+      setMessages((prev) => prev.map((m, i) => i === index ? { ...m, content } : m))
 
     setError('')
     setGeneratingIndex(index)
@@ -125,21 +128,22 @@ export default function App() {
       const res = await fetch(apiUrl(streaming ? 'chat-stream' : 'chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: history.map(({ role, content }) => ({ role, content })) }),
+        body: JSON.stringify({
+          messages: sentHistory.map(({ message: { role, content } }) => ({ role, content })),
+        }),
         signal: controller.signal,
       })
       const filtered = res.headers.get('X-Filtered-Message-Indices')
       if (filtered) {
-        const blocked = new Set(filtered.split(',').map(Number))
-        setMessages((prev) => prev.map((m, i) => i < history.length && blocked.has(i)
-          ? { ...m, filtered: true }
-          : m))
+        const blocked = new Set(filtered.split(',').map((position) => sentHistory[Number(position)]?.messageIndex))
+        setMessages((prev) => prev.map((m, i) => {
+          if (blocked.has(i)) return { ...m, filtered: true }
+          if (i === index) return { ...m, blockedResponse: true }
+          return m
+        }))
       }
       if (!res.ok) {
         const detail = await res.text()
-        if (res.status === 422 && filtered) {
-          throw new Error('No usable user message remains. Send a nutrition question.')
-        }
         throw new Error(`${res.status} ${detail}`)
       }
 
@@ -288,7 +292,7 @@ export default function App() {
                     >
                       Copy
                     </button>
-                    {m.role === 'assistant' && (
+                    {m.role === 'assistant' && !m.blockedResponse && (
                       <button
                         type="button"
                         aria-disabled={busy}

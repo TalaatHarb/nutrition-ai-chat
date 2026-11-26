@@ -15,6 +15,7 @@ from providers import create_provider
 
 SYSTEM_PROMPT = Path(__file__).with_name("nutrition_prompt.txt").read_text(encoding="utf-8").strip()
 FILTERED_MESSAGES_HEADER = "X-Filtered-Message-Indices"
+BLOCKED_REPLY = "Prompt injection blocked"
 
 app = FastAPI(
     title="Nutrition Assistant",
@@ -59,7 +60,7 @@ def prepare_messages(req: ChatRequest) -> tuple[list[LLMMessage], dict[str, str]
         else:
             allowed.append(LLMMessage(role=message.role, content=message.content))
     headers = {FILTERED_MESSAGES_HEADER: ",".join(blocked)} if blocked else {}
-    if not any(message.role == "user" and message.content.strip() for message in allowed):
+    if not blocked and not any(message.role == "user" and message.content.strip() for message in allowed):
         raise HTTPException(422, "No usable user message remains. Send a nutrition question.", headers=headers)
     return [LLMMessage(role="system", content=SYSTEM_PROMPT), *allowed], headers
 
@@ -68,6 +69,8 @@ def prepare_messages(req: ChatRequest) -> tuple[list[LLMMessage], dict[str, str]
 async def chat(req: ChatRequest, response: Response, llm: ProviderDependency):
     messages, headers = prepare_messages(req)
     response.headers.update(headers)
+    if headers:
+        return ChatResponse(model="", message=AssistantMessage(content=BLOCKED_REPLY))
     try:
         result = await ChatService(llm).complete(messages, req.model)
     except ProviderError as error:
@@ -80,6 +83,9 @@ async def chat_stream(req: ChatRequest, llm: ProviderDependency):
     messages, headers = prepare_messages(req)
 
     async def token_stream():
+        if headers:
+            yield BLOCKED_REPLY
+            return
         try:
             async for content in ChatService(llm).stream(messages, req.model):
                 yield content

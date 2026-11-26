@@ -38,7 +38,7 @@ Both endpoints use `OLLAMA_MODEL` when the request omits `model`, as the web cli
 
 Send only `user` and `assistant` messages. The server prepends its own nutrition instructions and handles tool calls internally; neither the system message nor raw tool messages are returned. This is not a guarantee against the model repeating its instructions, so keep secrets out of the prompt.
 
-Both chat endpoints screen client-supplied messages locally for common prompt injection patterns before calling Ollama. They omit flagged messages and report their zero-based request indices in `X-Filtered-Message-Indices`. If no usable user message remains, the API returns HTTP 422 without calling Ollama. This heuristic can miss attacks or flag benign messages; it is not a security boundary.
+Both chat endpoints screen client-supplied messages for common prompt injection patterns. If any message is flagged, the server skips the provider and returns `Prompt injection blocked`; `X-Filtered-Message-Indices` lists the flagged zero-based request indices. The non-streaming response has an empty `model` field because no model was called. The client excludes flagged messages and the corresponding blocked reply from later requests. A request without a usable user message and without flagged messages returns HTTP 422. This heuristic can miss attacks or flag benign messages; it is not a security boundary.
 
 The assistant can evaluate basic arithmetic, look up the current date and time in an IANA time zone, and shift a date or local meal time by days or minutes. Schedules are suggestions, not calendar events or reminders.
 
