@@ -5,7 +5,8 @@ from fastapi.testclient import TestClient
 
 import chat_service
 import main
-from llm_provider import LLMMessage, LLMProvider, LLMResponse, ProviderError, TextDelta, ToolCall
+from llm_models import LLMMessage, LLMResponse, TextDelta, ToolCall
+from llm_provider import LLMProvider, ProviderError
 from providers import create_provider
 
 

@@ -6,9 +6,8 @@ from collections.abc import AsyncIterator
 import httpx
 from pydantic import BaseModel
 
-from llm_provider import (
-    LLMMessage, LLMProvider, LLMResponse, ProviderError, TextDelta, ToolCall, ToolDefinition,
-)
+from llm_models import LLMMessage, LLMResponse, TextDelta, ToolCall, ToolDefinition
+from llm_provider import LLMProvider, ProviderError
 
 logger = logging.getLogger("uvicorn.error.ollama")
 

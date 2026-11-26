@@ -1,14 +1,15 @@
 import os
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
 
+from api_models import AssistantMessage, ChatRequest, ChatResponse, HealthResponse
 from chat_service import ChatService
-from llm_provider import LLMMessage, LLMProvider, ProviderError
+from llm_models import LLMMessage
+from llm_provider import LLMProvider, ProviderError
 from prompt_filter import looks_like_prompt_injection
 from providers import create_provider
 
@@ -37,31 +38,6 @@ def get_provider() -> LLMProvider:
 
 
 ProviderDependency = Annotated[LLMProvider, Depends(get_provider)]
-
-
-class Message(BaseModel):
-    role: Literal["user", "assistant"]
-    content: str
-
-
-class ChatRequest(BaseModel):
-    messages: list[Message]
-    model: str | None = None
-
-
-class AssistantMessage(BaseModel):
-    role: Literal["assistant"] = "assistant"
-    content: str
-
-
-class ChatResponse(BaseModel):
-    model: str
-    message: AssistantMessage
-
-
-class HealthResponse(BaseModel):
-    status: Literal["ok"]
-    provider_available: bool = Field(serialization_alias="ollama")
 
 
 @app.get("/healthz")

@@ -5,7 +5,7 @@ import re
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from llm_provider import ToolDefinition
+from llm_models import ToolDefinition
 
 
 BINARY_OPERATORS = {

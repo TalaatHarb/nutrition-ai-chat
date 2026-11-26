@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator
 
-from llm_provider import LLMMessage, LLMProvider, LLMResponse, ProviderError, TextDelta
+from llm_models import LLMMessage, LLMResponse, TextDelta
+from llm_provider import LLMProvider, ProviderError
 from nutrition_tools import TOOLS, run_tool
 
 MAX_TOOL_ROUNDS = 4
